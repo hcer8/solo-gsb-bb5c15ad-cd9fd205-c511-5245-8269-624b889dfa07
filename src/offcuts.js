@@ -787,6 +787,9 @@ function inventorySummary(state = store) {
  *   minW?, minH?: 要求余料某种朝向下至少能容纳 minW×minH
  *   grain?: 仅返回该纸张纹向的余料
  *   q?: 关键字（纸型名称 / 来源批次 / 订单号）
+ * @returns {{ summary, count, offcuts, allocations }}
+ *   offcuts 为遵循筛选条件的明细列表；allocations 为完整已预占单分组
+ *   （不随筛选裁剪，见 allocationGroups）
  */
 function listOffcuts(query = {}) {
   const status = query.status == null || query.status === '' ? 'all' : String(query.status);
@@ -826,12 +829,61 @@ function listOffcuts(query = {}) {
     return offcutSeq(a.id) - offcutSeq(b.id);
   });
 
-  return { summary: inventorySummary(store), count: list.length, offcuts: list };
+  // 同一次库存读取另返回完整已预占单分组：分组不随上面的明细筛选裁剪，
+  // 组内编号、总块数与释放范围始终对应整单（即使明细列表一行都不匹配）
+  return {
+    summary: inventorySummary(store),
+    count: list.length,
+    offcuts: list,
+    allocations: allocationGroups(store),
+  };
 }
 
 function offcutSeq(id) {
   const n = Number(String(id).replace(/^OC-/, ''));
   return Number.isFinite(n) ? n : 0;
+}
+
+function allocSeq(id) {
+  const n = Number(String(id).replace(/^AL-/, ''));
+  return Number.isFinite(n) ? n : 0;
+}
+
+/**
+ * 完整已预占单分组：按预占单号聚齐库存中全部已预占余料（不做任何筛选），
+ * 供查询接口随明细列表一并返回。释放预占始终按整单生效，因此这里必须给出
+ * 整单的全貌——组内余料编号、总块数 count 与释放按钮作用的范围一致，
+ * 不随明细列表的筛选条件裁剪。
+ *
+ * 每组：{ allocationId, product, ref, createdAt, count, offcutIds, offcuts }
+ * 确定性排序：组按预占单号升序，组内余料按编号升序。
+ */
+function allocationGroups(state = store) {
+  const groups = new Map(); // allocationId → group
+  for (const rec of state.offcuts.values()) {
+    if (rec.status !== 'reserved' || !rec.reservation) continue;
+    const aid = rec.reservation.allocationId;
+    let g = groups.get(aid);
+    if (!g) {
+      g = {
+        allocationId: aid,
+        product: rec.reservation.product,
+        ref: rec.reservation.ref,
+        createdAt: rec.reservation.createdAt,
+        offcuts: [],
+      };
+      groups.set(aid, g);
+    }
+    g.offcuts.push(rec);
+  }
+  const list = [...groups.values()]
+    .sort((a, b) => allocSeq(a.allocationId) - allocSeq(b.allocationId));
+  for (const g of list) {
+    g.offcuts.sort((a, b) => offcutSeq(a.id) - offcutSeq(b.id));
+    g.count = g.offcuts.length;
+    g.offcutIds = g.offcuts.map((o) => o.id);
+  }
+  return list;
 }
 
 /** 余料去重指纹：来源（类型/批次/纸张序号/轮次）+ 纸型/刀缝 + 坐标尺寸 */
@@ -1098,6 +1150,7 @@ module.exports = {
   ingestOffcuts,
   createOffcut,
   listOffcuts,
+  allocationGroups,
   allocateOffcuts,
   releaseAllocations,
   feasiblePlacement,

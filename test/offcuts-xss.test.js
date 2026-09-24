@@ -143,6 +143,20 @@ function maliciousOffcut(status) {
   };
 }
 
+// GET /api/offcuts 返回的完整已预占单分组形态（allocations 元素）
+function maliciousGroup() {
+  const o = maliciousOffcut('reserved');
+  return {
+    allocationId: AID,
+    product: o.reservation.product,
+    ref: REF,
+    createdAt: o.reservation.createdAt,
+    count: 1,
+    offcutIds: [o.id],
+    offcuts: [o],
+  };
+}
+
 /* ---------------- 列表渲染 ---------------- */
 
 test('列表渲染：纸型名/订单号/批次号/单据号/编号/纹向均按文本上下文转义', () => {
@@ -161,7 +175,7 @@ test('列表渲染：纸型名/订单号/批次号/单据号/编号/纹向均按
 /* ---------------- 预占明细渲染 ---------------- */
 
 test('预占明细：预占单号/单据号/编号转义，title 与 data-allocation 按属性上下文转义', () => {
-  const html = ocAllocationsHtml([maliciousOffcut('reserved')]);
+  const html = ocAllocationsHtml([maliciousGroup()]);
   assertSafeStaticStructure(html, '预占明细');
   // 该视图展示：预占单号、单据号、批次号（title 提示）、纹向标签
   for (const p of [AID, REF, BATCH, GRAIN_PAYLOAD]) {
@@ -175,8 +189,8 @@ test('预占明细：预占单号/单据号/编号转义，title 与 data-alloca
   assert.ok(dataMatch, '应存在 data-allocation 属性');
   assert.ok(!dataMatch[1].includes('"'), 'data-allocation 属性值中不应有未转义引号');
   assert.equal(decodeEntities(dataMatch[1]), AID);
-  // 无预占时返回空串
-  assert.equal(ocAllocationsHtml([maliciousOffcut('available')]), '');
+  // 无预占单时返回空串
+  assert.equal(ocAllocationsHtml([]), '');
 });
 
 /* ---------------- 复用结果横幅 ---------------- */

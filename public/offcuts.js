@@ -159,7 +159,7 @@ async function ocRefresh() {
   }
   ocRenderSummary(data.summary);
   ocRenderList(data.offcuts);
-  ocRenderAllocations(data.offcuts);
+  ocRenderAllocations(data.allocations || []);
   ocUpdateNavBadge(data.summary);
 }
 
@@ -241,31 +241,29 @@ function ocRenderList(list) {
 
 /* ---------------- 预占单分组与释放 ---------------- */
 
-function ocAllocationsHtml(list) {
-  const reserved = list.filter((o) => o.status === 'reserved');
-  if (!reserved.length) return '';
-  const groups = new Map();
-  for (const o of reserved) {
-    const aid = o.reservation.allocationId;
-    if (!groups.has(aid)) groups.set(aid, []);
-    groups.get(aid).push(o);
-  }
-  const blocks = [...groups.entries()].map(([aid, items]) => {
-    const r0 = items[0].reservation;
-    const chips = items.map((o) => `
+/*
+ * 渲染完整已预占单分组（服务端 GET /api/offcuts 随明细列表同次返回的
+ * allocations 字段）。分组不随明细列表的筛选条件裁剪：组内余料编号、
+ * 「占用 N 块」与「释放该预占」按钮始终对应整单——即使筛选后该单只有
+ * 部分余料（甚至一块都不）出现在上方明细列表中。
+ */
+function ocAllocationsHtml(groups) {
+  if (!groups || !groups.length) return '';
+  const blocks = groups.map((g) => {
+    const chips = g.offcuts.map((o) => `
       <span class="oc-chip" title="${ocSourceText(o)}">
-        ${ocEscapeHtml(o.id)} · ${ocFmt(o.w)}×${ocFmt(o.h)}${o.reservation.rotated ? ' ⟳' : ''}
+        ${ocEscapeHtml(o.id)} · ${ocFmt(o.w)}×${ocFmt(o.h)}${o.reservation && o.reservation.rotated ? ' ⟳' : ''}
       </span>`).join('');
     return `
       <div class="oc-alloc-group">
         <div class="oc-alloc-head">
-          <span>预占单 <b>${ocEscapeHtml(aid)}</b></span>
-          <span>成品 <b>${ocFmt(r0.product.width)}×${ocFmt(r0.product.height)}</b> mm
-            （${ocGrainReqLabel(r0.product.grain)}）</span>
-          <span>占用 <b>${items.length}</b> 块</span>
-          ${r0.ref ? `<span>单据：<b>${ocEscapeHtml(r0.ref)}</b></span>` : ''}
-          <span class="oc-alloc-time">${ocEscapeHtml(new Date(r0.createdAt).toLocaleString('zh-CN'))}</span>
-          <button type="button" class="btn btn-ghost oc-release" data-allocation="${ocEscapeAttr(aid)}">释放该预占</button>
+          <span>预占单 <b>${ocEscapeHtml(g.allocationId)}</b></span>
+          <span>成品 <b>${ocFmt(g.product.width)}×${ocFmt(g.product.height)}</b> mm
+            （${ocGrainReqLabel(g.product.grain)}）</span>
+          <span>占用 <b>${g.count}</b> 块</span>
+          ${g.ref ? `<span>单据：<b>${ocEscapeHtml(g.ref)}</b></span>` : ''}
+          <span class="oc-alloc-time">${ocEscapeHtml(new Date(g.createdAt).toLocaleString('zh-CN'))}</span>
+          <button type="button" class="btn btn-ghost oc-release" data-allocation="${ocEscapeAttr(g.allocationId)}">释放该预占</button>
         </div>
         <div class="oc-chips">${chips}</div>
       </div>`;
@@ -273,9 +271,9 @@ function ocAllocationsHtml(list) {
   return `<h3>已预占余料（按预占单分组）</h3>${blocks}`;
 }
 
-function ocRenderAllocations(list) {
+function ocRenderAllocations(groups) {
   const box = OC$('ocAllocations');
-  box.innerHTML = ocAllocationsHtml(list);
+  box.innerHTML = ocAllocationsHtml(groups);
   box.querySelectorAll('.oc-release').forEach((btn) =>
     btn.addEventListener('click', () => ocRelease({ allocationIds: [btn.dataset.allocation] })));
 }

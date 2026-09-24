@@ -464,7 +464,10 @@ schedule/workOrder 不一致（刀次缺来源批次、与排程批次成员不�
 
 **查询**：按状态（**全部 / 可用 / 已预占**）、最小可容纳尺寸（允许旋转比较）、
 纸张纹向与关键字（纸型 / 批次 / 订单号 / 编号）筛选；返回汇总
-（总数、可用 / 已预占块数与面积、库存总面积）与明细列表。
+（总数、可用 / 已预占块数与面积、库存总面积）、遵循筛选条件的明细列表，
+以及**完整已预占单分组 `allocations`**——同一次库存读取中按预占单聚齐全部已预占余料，
+**不随明细筛选裁剪**：组内余料编号、总块数与「释放该预占」按钮始终对应整单，
+即使筛选后该单只有部分余料（甚至一块都不）出现在明细列表中，分组仍完整可见。
 
 **复用预占 `POST /api/offcuts/allocate`**：给定**成品宽、高、数量与纹向要求**
 （`grain` 缺省 `any`，可带 `ref` 关联工单号）：
@@ -485,7 +488,9 @@ schedule/workOrder 不一致（刀次缺来源批次、与排程批次成员不�
 或**余料编号**（释放单块，可混合、重复编号自动去重）释放；编号不存在、单号已释放或
 余料未处于预占状态均返回 HTTP 400，且**全部校验通过并在副本中一次性释放后原子写盘，
 写盘成功才发布**（校验失败或写盘失败都不改动库存）。
-页面按预占单分组展示已预占余料并提供「释放该预占」按钮；释放后的余料立即可再次被预占。
+页面按预占单分组展示已预占余料并提供「释放该预占」按钮（分组取自查询接口同次返回的
+完整分组，块数与编号恒为整单，不随列表筛选变化）；释放后明细列表与预占单一并刷新，
+释放出的余料立即可再次被预占。
 
 > 注意：当前复用模型把一块余料预占给一件成品（不模拟在余料内部的再次切割与子余料分裂），
 > 因此「数量」即所需余料块数；库存与预占台账持久化在本地快照（Docker 部署为命名数据卷），
@@ -647,7 +652,7 @@ npm start          # 默认 http://localhost:3000，可用 PORT=8080 npm start �
 
 - `POST /api/offcuts` — 手工录入一条余料（`paperName?`、`width`、`height`、`paperGrain?`、`kerf?`、`batchId?`、`orderNo?`；返回余料记录与库存汇总，HTTP 201）
 - `POST /api/offcuts/ingest` — 从现有排料结果批量登记（`layout` 传单张 / 比选 / 批量 / 多纸型成本返回；`batchId?` 来源批次号，缺省自动生成；同批次相同余料去重，返回 `ingested`/`skipped`/`offcutIds`；**原子登记**——任一余料无效时整批不写入、不消耗自动序号，HTTP 400）
-- `GET /api/offcuts` — 余料查询（`status=all|available|reserved`、`minW`/`minH` 最小可容纳尺寸、`grain` 纸张纹向、`q` 关键字；返回 `summary` 与余料明细）
+- `GET /api/offcuts` — 余料查询（`status=all|available|reserved`、`minW`/`minH` 最小可容纳尺寸、`grain` 纸张纹向、`q` 关键字；返回 `summary`、遵循筛选的余料明细，以及不随筛选裁剪的完整已预占单分组 `allocations`——每组含 `allocationId`、`product`、`ref`、`createdAt`、`count`、`offcutIds` 与整单全部余料记录）
 - `POST /api/offcuts/allocate` — 复用预占（`width`、`height`、`quantity`、`grain?`、`ref?`；成功返回 `status:'fulfilled'`、`allocationId` 与 `reserved` 明细；缺口返回 `status:'shortfall'`、`shortfall`、`blockedBySize`、`blockedGrain`、`unavailableReserved` 与可行候选，**不改动任何记录**，HTTP 200）
 - `POST /api/offcuts/release` — 释放预占（`allocationIds?` 预占单号数组或 `offcutIds?` 余料编号数组；成功返回释放块数与库存汇总，编号非法 / 未预占返回 HTTP 400）
 
