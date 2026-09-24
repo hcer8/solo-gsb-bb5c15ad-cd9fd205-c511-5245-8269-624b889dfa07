@@ -475,3 +475,81 @@ test('编号单调且多次预占/释放顺序确定', () => {
   assert.notEqual(a.allocationId, b.allocationId);
   assert.ok(b.allocationId > a.allocationId);
 });
+
+/* ---------------- 整单分组不随列表筛选裁剪 ---------------- */
+
+test('查询：同一预占单含大小不同余料时，最小尺寸筛选只裁剪明细，整单分组仍是完整两块', () => {
+  createOffcut({ paperName: '大块', width: 300, height: 200 }); // OC-000001
+  createOffcut({ paperName: '小块', width: 50, height: 40 }); // OC-000002
+  const alloc = allocateOffcuts({ width: 30, height: 30, quantity: 2, grain: 'any' });
+  assert.equal(alloc.status, 'fulfilled');
+  assert.equal(alloc.reservedCount, 2);
+
+  // 最小尺寸筛选后明细只剩大块一块
+  const filtered = listOffcuts({ status: 'reserved', minW: 100, minH: 100 });
+  assert.equal(filtered.count, 1);
+  assert.equal(filtered.offcuts[0].id, 'OC-000001');
+
+  // 同次读取返回的整单分组不被筛选裁剪：总块数为 2，组内两块编号齐全
+  assert.equal(filtered.allocationGroups.length, 1);
+  const group = filtered.allocationGroups[0];
+  assert.equal(group.allocationId, alloc.allocationId);
+  assert.equal(group.count, 2);
+  assert.deepEqual(group.offcuts.map((o) => o.id), ['OC-000001', 'OC-000002']);
+  assert.ok(group.offcuts.every((o) =>
+    o.status === 'reserved' && o.reservation.allocationId === alloc.allocationId));
+});
+
+test('查询：无匹配明细（可用筛选 / 尺寸筛掉全部 / 关键字无命中）时整单分组仍可见', () => {
+  createOffcut({ paperName: '大块', width: 300, height: 200 });
+  createOffcut({ paperName: '小块', width: 50, height: 40 });
+  const alloc = allocateOffcuts({ width: 30, height: 30, quantity: 2, ref: 'WO-X' });
+
+  // 只看可用：明细中没有任何已预占记录
+  const onlyAvailable = listOffcuts({ status: 'available' });
+  assert.equal(onlyAvailable.count, 0);
+  assert.equal(onlyAvailable.allocationGroups.length, 1);
+  assert.equal(onlyAvailable.allocationGroups[0].count, 2);
+
+  // 最小尺寸把两块都筛掉
+  const tooBig = listOffcuts({ minW: 1000, minH: 1000 });
+  assert.equal(tooBig.count, 0);
+  assert.equal(tooBig.allocationGroups.length, 1);
+  assert.deepEqual(
+    tooBig.allocationGroups[0].offcuts.map((o) => o.id),
+    ['OC-000001', 'OC-000002']
+  );
+
+  // 关键字无命中
+  const noKw = listOffcuts({ q: '不存在的纸型关键字' });
+  assert.equal(noKw.count, 0);
+  assert.equal(noKw.allocationGroups[0].allocationId, alloc.allocationId);
+  assert.equal(noKw.allocationGroups[0].ref, 'WO-X');
+});
+
+test('查询：多个预占单分组按单号升序、组内按余料编号升序；无预占时为空数组', () => {
+  assert.deepEqual(listOffcuts().allocationGroups, []);
+
+  createOffcut({ width: 300, height: 300 }); // OC-1
+  createOffcut({ width: 250, height: 250 }); // OC-2
+  createOffcut({ width: 200, height: 200 }); // OC-3
+  // 择优先取剩余面积更小（即更小）的余料：首单占用 OC-3、OC-2
+  const first = allocateOffcuts({ width: 50, height: 50, quantity: 2 }); // AL-1
+  const second = allocateOffcuts({ width: 50, height: 50, quantity: 1 }); // AL-2: OC-1
+
+  const groups = listOffcuts().allocationGroups;
+  assert.deepEqual(groups.map((g) => g.allocationId), [first.allocationId, second.allocationId]);
+  assert.deepEqual(groups[0].offcuts.map((o) => o.id), ['OC-000002', 'OC-000003']);
+  assert.equal(groups[0].count, 2);
+  assert.deepEqual(groups[1].offcuts.map((o) => o.id), ['OC-000001']);
+  assert.equal(groups[1].count, 1);
+  // 分组汇总携带成品尺寸 / 单据 / 预占时间（取自组内记录，同单这些字段一致）
+  assert.equal(groups[0].product.width, 50);
+  assert.ok(groups[0].createdAt);
+
+  // 释放整单后分组随之消失（同次库存读取的汇总与明细一致）
+  releaseAllocations({ allocationIds: [first.allocationId] });
+  const after = listOffcuts();
+  assert.deepEqual(after.allocationGroups.map((g) => g.allocationId), [second.allocationId]);
+  assert.equal(after.summary.reserved, 1);
+});

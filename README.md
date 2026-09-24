@@ -465,6 +465,15 @@ schedule/workOrder 不一致（刀次缺来源批次、与排程批次成员不�
 **查询**：按状态（**全部 / 可用 / 已预占**）、最小可容纳尺寸（允许旋转比较）、
 纸张纹向与关键字（纸型 / 批次 / 订单号 / 编号）筛选；返回汇总
 （总数、可用 / 已预占块数与面积、库存总面积）与明细列表。
+返回中**另含 `allocationGroups`（完整已预占单分组）**：它与明细列表取自
+**同一次库存读取**，但**不套用任何筛选条件**——同一预占单含尺寸不同的多块余料、
+按最小尺寸等条件筛选后明细只剩部分块时，分组内的余料编号与**总块数仍对应整单**
+（页面“占用 N 块”与「释放该预占」的释放范围始终一致，绝不会出现页面写“占用 1 块”、
+点击释放却释放两块的误显）；被筛选掉的组成员在页面上弱化标注并提示“整单释放时
+一并释放”。**没有任何匹配明细但库中仍有预占单时，分组照常返回 / 展示**。
+分组按预占单号升序、组内按余料编号升序；每组含 `allocationId`、成品 `product`、
+单据 `ref`、预占时间 `createdAt`、总块数 `count` 与组内完整余料 `offcuts`。
+释放 / 预占后页面重新查询，明细与分组两种视图一并刷新。
 
 **复用预占 `POST /api/offcuts/allocate`**：给定**成品宽、高、数量与纹向要求**
 （`grain` 缺省 `any`，可带 `ref` 关联工单号）：
@@ -629,7 +638,10 @@ npm start          # 默认 http://localhost:3000，可用 PORT=8080 npm start �
    尺寸、来源批次与订单号）。填写成品宽高、数量、纹向要求后点「预占余料」：
    服务端按旋转 / 纹向可行性与最小剩余面积确定性选择，足量时原子预占并给出预占单号，
    不足时红字列出**缺口块数与原因（尺寸不足 / 纹向受限 / 已被预占）且不扣减任何记录**；
-   已预占余料按预占单分组展示，可一键**释放该预占**。
+   已预占余料按预占单分组展示，可一键**释放该预占**。筛选只作用于上方明细：
+   同一预占单的部分余料被筛选条件排除时，下方分组仍显示**整单全部编号与总块数**
+   （被排除的余料弱化标注），「释放该预占」始终释放整单；即使没有任何匹配明细，
+   有预占单时分组仍可见。
 
 ## HTTP 接口
 
@@ -647,7 +659,7 @@ npm start          # 默认 http://localhost:3000，可用 PORT=8080 npm start �
 
 - `POST /api/offcuts` — 手工录入一条余料（`paperName?`、`width`、`height`、`paperGrain?`、`kerf?`、`batchId?`、`orderNo?`；返回余料记录与库存汇总，HTTP 201）
 - `POST /api/offcuts/ingest` — 从现有排料结果批量登记（`layout` 传单张 / 比选 / 批量 / 多纸型成本返回；`batchId?` 来源批次号，缺省自动生成；同批次相同余料去重，返回 `ingested`/`skipped`/`offcutIds`；**原子登记**——任一余料无效时整批不写入、不消耗自动序号，HTTP 400）
-- `GET /api/offcuts` — 余料查询（`status=all|available|reserved`、`minW`/`minH` 最小可容纳尺寸、`grain` 纸张纹向、`q` 关键字；返回 `summary` 与余料明细）
+- `GET /api/offcuts` — 余料查询（`status=all|available|reserved`、`minW`/`minH` 最小可容纳尺寸、`grain` 纸张纹向、`q` 关键字；返回 `summary`、遵循筛选的余料明细 `offcuts`（及 `count`），**另返回同次库存读取、不随筛选裁剪的完整已预占单分组 `allocationGroups`**：组内编号 / 总块数 `count` / 整单释放始终对应整单，无匹配明细但有预占单时仍返回该分组）
 - `POST /api/offcuts/allocate` — 复用预占（`width`、`height`、`quantity`、`grain?`、`ref?`；成功返回 `status:'fulfilled'`、`allocationId` 与 `reserved` 明细；缺口返回 `status:'shortfall'`、`shortfall`、`blockedBySize`、`blockedGrain`、`unavailableReserved` 与可行候选，**不改动任何记录**，HTTP 200）
 - `POST /api/offcuts/release` — 释放预占（`allocationIds?` 预占单号数组或 `offcutIds?` 余料编号数组；成功返回释放块数与库存汇总，编号非法 / 未预占返回 HTTP 400）
 

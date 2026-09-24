@@ -781,12 +781,49 @@ function inventorySummary(state = store) {
 }
 
 /**
+ * 汇总当前全部已预占余料并按预占单分组（不套用任何列表筛选）。
+ *
+ * 同一预占单可能含尺寸差异较大的多块余料；列表的最小尺寸 / 纹向 / 关键字 /
+ * 状态筛选只应裁剪明细，绝不能裁剪分组：组内编号、总块数与「释放该预占」
+ * 始终对应整单。明细全部被筛选掉时分组仍需可见，故该分组独立于查询明细计算。
+ * 与明细列表同一次库存读取（同一 store 快照），保证两组数据彼此一致。
+ *
+ * 组按预占单号升序、组内余料按编号升序，输出确定。
+ */
+function allocationGroups(state = store) {
+  const groups = new Map(); // allocationId → { offcuts: [] }
+  for (const rec of state.offcuts.values()) {
+    if (rec.status !== 'reserved') continue;
+    const aid = rec.reservation.allocationId;
+    if (!groups.has(aid)) groups.set(aid, []);
+    groups.get(aid).push(rec);
+  }
+  return [...groups.entries()]
+    .sort((a, b) => allocationSeq(a[0]) - allocationSeq(b[0]))
+    .map(([allocationId, offcuts]) => {
+      offcuts.sort((a, b) => offcutSeq(a.id) - offcutSeq(b.id));
+      const r0 = offcuts[0].reservation;
+      return {
+        allocationId,
+        product: r0.product,
+        ref: r0.ref,
+        createdAt: r0.createdAt,
+        count: offcuts.length,
+        offcuts,
+      };
+    });
+}
+
+/**
  * 查询余料。
  * @param {object} query
  *   status?: 'all'（缺省）| 'available' | 'reserved'
  *   minW?, minH?: 要求余料某种朝向下至少能容纳 minW×minH
  *   grain?: 仅返回该纸张纹向的余料
  *   q?: 关键字（纸型名称 / 来源批次 / 订单号）
+ * @returns {{ summary, count, offcuts, allocationGroups }}
+ *   offcuts 遵循全部筛选条件；allocationGroups 为同次库存读取下的完整已预占单
+ *   分组（不随筛选裁剪），组内总块数与释放范围始终对应整单。
  */
 function listOffcuts(query = {}) {
   const status = query.status == null || query.status === '' ? 'all' : String(query.status);
@@ -826,11 +863,21 @@ function listOffcuts(query = {}) {
     return offcutSeq(a.id) - offcutSeq(b.id);
   });
 
-  return { summary: inventorySummary(store), count: list.length, offcuts: list };
+  return {
+    summary: inventorySummary(store),
+    count: list.length,
+    offcuts: list,
+    allocationGroups: allocationGroups(store),
+  };
 }
 
 function offcutSeq(id) {
   const n = Number(String(id).replace(/^OC-/, ''));
+  return Number.isFinite(n) ? n : 0;
+}
+
+function allocationSeq(id) {
+  const n = Number(String(id).replace(/^AL-/, ''));
   return Number.isFinite(n) ? n : 0;
 }
 

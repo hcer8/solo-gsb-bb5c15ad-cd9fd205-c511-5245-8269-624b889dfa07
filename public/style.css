@@ -1100,3 +1100,12 @@ input:focus, select:focus {
   font-weight: 700;
   white-space: nowrap;
 }
+/* 组内成员被当前筛选条件排除（仍属整单、随整单一并释放）：弱化并以虚线区分 */
+.oc-chip-muted {
+  background: #f1f3f5;
+  border-color: #ced4da;
+  border-style: dashed;
+  color: #868e96;
+  font-weight: 600;
+}
+.oc-alloc-filtered { color: #b35900; font-size: 12px; }

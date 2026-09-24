@@ -184,7 +184,10 @@ app.post('/api/offcuts/ingest', (req, res) => {
   }
 });
 
-// 余料查询：可用 / 已预占、最小尺寸、纹向、关键字
+// 余料查询：可用 / 已预占、最小尺寸、纹向、关键字。
+// 明细列表遵循全部筛选条件；同次库存读取另返回完整已预占单分组
+// （allocationGroups，不随筛选裁剪）——组内编号、总块数与整单释放按钮
+// 始终对应整单，明细被筛选掉时分组仍可见。
 app.get('/api/offcuts', (req, res) => {
   try {
     const result = listOffcuts(req.query || {});

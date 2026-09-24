@@ -179,6 +179,49 @@ test('预占明细：预占单号/单据号/编号转义，title 与 data-alloca
   assert.equal(ocAllocationsHtml([maliciousOffcut('available')]), '');
 });
 
+test('预占分组（整单结构）：单号/单据号/编号转义；被筛选掉的成员仍随整单渲染', () => {
+  // 服务端新形态：{ allocationId, product, ref, createdAt, count, offcuts }
+  const visible = maliciousOffcut('reserved'); // OC-000001
+  const hidden = {
+    ...maliciousOffcut('reserved'),
+    id: 'OC-000002',
+    w: 40, h: 30, // 尺寸更小：模拟被最小尺寸筛选排除
+  };
+  const groups = [{
+    allocationId: AID,
+    product: { width: 200, height: 80, grain: GRAIN_PAYLOAD },
+    ref: REF,
+    createdAt: '2026-09-23T08:00:00.000Z',
+    count: 2,
+    offcuts: [visible, hidden],
+  }];
+
+  // 明细只命中一块，但分组按整单渲染两块、总块数显示 2
+  const html = ocAllocationsHtml(groups, [visible]);
+  assertSafeStaticStructure(html, '预占分组');
+  for (const p of [AID, REF, BATCH, GRAIN_PAYLOAD]) {
+    assertPayloadVisible(html, p, `预占分组(${p})`);
+  }
+  assert.ok(html.includes('OC-000001'));
+  assert.ok(html.includes('OC-000002'));
+  assert.ok(visibleText(html).includes('占用'));
+  // “占用 <b>2</b> 块”——整单 2 块，不随筛选裁剪
+  assert.ok(/占用[\s\S]*<b>2<\/b>[\s\S]*块/.test(html), '应显示整单总块数 2');
+  // 被筛掉的成员带弱化样式与“整单释放”提示
+  assert.ok(html.includes('oc-chip-muted'));
+  assert.ok(visibleText(html).includes('整单释放'));
+  // data-allocation 仍为完整单号
+  const dataMatch = html.match(/data-allocation="([^"]*)"/);
+  assert.ok(dataMatch);
+  assert.equal(decodeEntities(dataMatch[1]), AID);
+
+  // 不传筛选明细（兼容调用）：不产生“被筛掉”提示，两块都正常显示
+  const allVisible = ocAllocationsHtml(groups);
+  assert.ok(!allVisible.includes('oc-chip-muted'));
+  // 分组为空 / 无预占
+  assert.equal(ocAllocationsHtml([]), '');
+});
+
 /* ---------------- 复用结果横幅 ---------------- */
 
 test('复用成功结果：预占单号与单据号转义后展示原文', () => {
